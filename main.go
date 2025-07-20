@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -19,6 +18,7 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 type User struct {
@@ -120,7 +120,7 @@ func respondWithError(w http.ResponseWriter, status int, msg string, err error) 
 	log.Printf("%v: %s", msg, err)
 }
 
-func createUser(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email string `json:"email"`
 	}
@@ -135,19 +135,32 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
 		return
 	}
-	
+
+	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "faild to query"})
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, user)
 }
+
 
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatal("couldn't open database")
+	}
 	dbQueries := database.New(db)
 
 	const filepathRoot = "."
 	const port = "8080"
 	myApiConfig := apiConfig{
 		fileserverHits: atomic.Int32{},
+		dbQueries: dbQueries,
 	}
 
 	mux := http.NewServeMux()
@@ -160,7 +173,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", myApiConfig.returnHits)
 	mux.HandleFunc("POST /admin/reset", myApiConfig.reset)
 	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
-	mux.HandleFunc("POST /api/users", createUser)
+	mux.HandleFunc("POST /api/users", myApiConfig.createUser)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
