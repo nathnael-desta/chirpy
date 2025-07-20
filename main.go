@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -47,32 +48,66 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type returnVals struct {
-		Valid bool `json:"valid"`
+		Valid *bool `json:"valid,omitempty"`
+		Cleaned_Body *string `json:"cleaned_body,omitempty"`
 	}
 
 
 	params := parameters{}
-	
+
 
 	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
-		respondJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
 		return
 	}
+
 
 	if len(params.Body) > 140 {
-		respondJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
 		return
 	}
 
-	respondJSON(w, http.StatusOK, returnVals{Valid: true})
+	
+	if replacedString, modified := replaceProfane(params.Body); modified {
+		respondWithJSON(w, http.StatusOK, returnVals{Cleaned_Body: &replacedString})
+		return
+	}
+
+	 validTrue := true
+    respondWithJSON(w, http.StatusOK, returnVals{
+        Valid: &validTrue,
+    })
 }
 
-func respondJSON(w http.ResponseWriter, status int, body interface{}) {
+
+func replaceProfane(s string) (string, bool) {
+	var profane = []string{"kerfuffle","sharbert", "fornax"}
+	split_sentence := strings.Split(strings.ToLower(s), " ")
+	modified := false
+	for _, p := range profane {
+		for i, w := range split_sentence {
+			if w == p {
+				split_sentence[i] = "****"
+				modified = true
+				break
+			} 
+		}
+	}
+	return strings.Join(split_sentence, " "), modified
+}
+
+func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		log.Printf("Failed to write JSON response: %s", err)
+		respondWithError(w, http.StatusBadRequest, "Failed to write JSON response:", err)
 	}
+}
+
+func respondWithError(w http.ResponseWriter, status int, msg string, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	log.Printf("%v: %s",msg, err)
 }
 
 func main() {
