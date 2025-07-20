@@ -20,7 +20,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
-	platform string
+	platform       string
 }
 
 type User struct {
@@ -55,59 +55,6 @@ func (cfg *apiConfig) middlewareMetricsIncrease(next http.Handler) http.Handler 
 	})
 }
 
-func validate_chirp(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-
-	type errorReturn struct {
-		Error string `json:"error"`
-	}
-
-	type returnVals struct {
-		Valid        *bool   `json:"valid,omitempty"`
-		Cleaned_Body *string `json:"cleaned_body,omitempty"`
-	}
-
-	params := parameters{}
-
-	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
-		return
-	}
-
-	if len(params.Body) > 140 {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
-		return
-	}
-
-	if replacedString, modified := replaceProfane(params.Body); modified {
-		respondWithJSON(w, http.StatusOK, returnVals{Cleaned_Body: &replacedString})
-		return
-	}
-
-	validTrue := true
-	respondWithJSON(w, http.StatusOK, returnVals{
-		Valid: &validTrue,
-	})
-}
-
-func replaceProfane(s string) (string, bool) {
-	var profane = []string{"kerfuffle", "sharbert", "fornax"}
-	split_sentence := strings.Split(strings.ToLower(s), " ")
-	modified := false
-	for _, p := range profane {
-		for i, w := range split_sentence {
-			if w == p {
-				split_sentence[i] = "****"
-				modified = true
-				break
-			}
-		}
-	}
-	return strings.Join(split_sentence, " "), modified
-}
-
 func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -134,7 +81,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if exists, err := cfg.dbQueries.EmailExists(r.Context() ,params.Email); err != nil {
+	if exists, err := cfg.dbQueries.EmailExists(r.Context(), params.Email); err != nil {
 		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to query %s", err))
 		return
 	} else if exists == 1 {
@@ -158,15 +105,62 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := cfg.dbQueries.Reset(r.Context()) ; err != nil {
+	if err := cfg.dbQueries.Reset(r.Context()); err != nil {
 		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "failed to query"})
 	}
 
-	// var empty interface{} 
+	// var empty interface{}
 	w.WriteHeader(http.StatusNoContent)
 
-
 	// respondWithJSON(w, http.StatusNoContent, empty)
+}
+
+func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body   string `json:"body"`
+		UserId string `json:"user_id"`
+	}
+
+	type returnVals struct {
+		Id        string `json:"id"`
+		CreatedAt string `json:"created_at"`
+		UpdatedAt string `json:"updated_at"`
+		Body      string `json:"body"`
+		UserId    string `json:"user_id"`
+	}
+
+	params := parameters{}
+
+	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		return
+	}
+
+	if len(params.Body) > 140 {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
+		return
+	}
+
+	replacedString, _ := replaceProfane(params.Body)
+	params.Body = replacedString
+
+
+}
+
+func replaceProfane(s string) (string, bool) {
+	var profane = []string{"kerfuffle", "sharbert", "fornax"}
+	split_sentence := strings.Split(strings.ToLower(s), " ")
+	modified := false
+	for _, p := range profane {
+		for i, w := range split_sentence {
+			if w == p {
+				split_sentence[i] = "****"
+				modified = true
+				break
+			}
+		}
+	}
+	return strings.Join(split_sentence, " "), modified
 }
 
 func main() {
@@ -183,8 +177,7 @@ func main() {
 	myApiConfig := apiConfig{
 		fileserverHits: atomic.Int32{},
 		dbQueries:      dbQueries,
-		platform: os.Getenv("PLATFORM"),
-		
+		platform:       os.Getenv("PLATFORM"),
 	}
 
 	mux := http.NewServeMux()
@@ -196,8 +189,8 @@ func main() {
 	})
 	mux.HandleFunc("GET /admin/metrics", myApiConfig.returnHits)
 	mux.HandleFunc("POST /admin/reset", myApiConfig.reset)
-	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
 	mux.HandleFunc("POST /api/users", myApiConfig.createUser)
+	mux.HandleFunc("POST /api/chirps", myApiConfig.createChirp)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
