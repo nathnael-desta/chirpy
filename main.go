@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -19,6 +20,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform string
 }
 
 type User struct {
@@ -26,6 +28,10 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type errorReturn struct {
+	Error string `json:"error"`
 }
 
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
@@ -39,10 +45,6 @@ func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "text/html;")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(html))
-}
-
-func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits.Swap(0)
 }
 
 func (cfg *apiConfig) middlewareMetricsIncrease(next http.Handler) http.Handler {
@@ -110,23 +112,19 @@ func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		respondWithError(w, http.StatusBadRequest, "Failed to write JSON response:", err)
+		respondWithError(w, http.StatusBadRequest, fmt.Errorf("failed to write JSON response: %s", err))
 	}
 }
 
-func respondWithError(w http.ResponseWriter, status int, msg string, err error) {
+func respondWithError(w http.ResponseWriter, status int, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	log.Printf("%v: %s", msg, err)
+	log.Printf("%s", err)
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email string `json:"email"`
-	}
-
-	type errorReturn struct {
-		Error string `json:"error"`
 	}
 
 	params := parameters{}
@@ -146,6 +144,22 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusCreated, user)
 }
 
+func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, http.StatusForbidden, fmt.Errorf("403 forbidden"))
+		return
+	}
+
+	if err := cfg.dbQueries.Reset(r.Context()) ; err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "failed to query"})
+	}
+
+	// var empty interface{} 
+	w.WriteHeader(http.StatusNoContent)
+
+
+	// respondWithJSON(w, http.StatusNoContent, empty)
+}
 
 func main() {
 	godotenv.Load()
@@ -160,7 +174,9 @@ func main() {
 	const port = "8080"
 	myApiConfig := apiConfig{
 		fileserverHits: atomic.Int32{},
-		dbQueries: dbQueries,
+		dbQueries:      dbQueries,
+		platform: os.Getenv("PLATFORM"),
+		
 	}
 
 	mux := http.NewServeMux()

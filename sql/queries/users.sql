@@ -8,5 +8,5 @@ VALUES (
 )
 RETURNING *;
 
--- -- name: Reset 
--- DELETE 
+-- name: Reset :exec
+DELETE FROM users;
