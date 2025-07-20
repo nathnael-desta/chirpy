@@ -1,16 +1,31 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/nathnael-desta/chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
@@ -48,40 +63,35 @@ func validate_chirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type returnVals struct {
-		Valid *bool `json:"valid,omitempty"`
+		Valid        *bool   `json:"valid,omitempty"`
 		Cleaned_Body *string `json:"cleaned_body,omitempty"`
 	}
 
-
 	params := parameters{}
-
 
 	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
 		return
 	}
 
-
 	if len(params.Body) > 140 {
 		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
 		return
 	}
 
-	
 	if replacedString, modified := replaceProfane(params.Body); modified {
 		respondWithJSON(w, http.StatusOK, returnVals{Cleaned_Body: &replacedString})
 		return
 	}
 
-	 validTrue := true
-    respondWithJSON(w, http.StatusOK, returnVals{
-        Valid: &validTrue,
-    })
+	validTrue := true
+	respondWithJSON(w, http.StatusOK, returnVals{
+		Valid: &validTrue,
+	})
 }
 
-
 func replaceProfane(s string) (string, bool) {
-	var profane = []string{"kerfuffle","sharbert", "fornax"}
+	var profane = []string{"kerfuffle", "sharbert", "fornax"}
 	split_sentence := strings.Split(strings.ToLower(s), " ")
 	modified := false
 	for _, p := range profane {
@@ -90,7 +100,7 @@ func replaceProfane(s string) (string, bool) {
 				split_sentence[i] = "****"
 				modified = true
 				break
-			} 
+			}
 		}
 	}
 	return strings.Join(split_sentence, " "), modified
@@ -107,10 +117,33 @@ func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 func respondWithError(w http.ResponseWriter, status int, msg string, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	log.Printf("%v: %s",msg, err)
+	log.Printf("%v: %s", msg, err)
+}
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	type errorReturn struct {
+		Error string `json:"error"`
+	}
+
+	params := parameters{}
+
+	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		return
+	}
+	
 }
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	dbQueries := database.New(db)
+
 	const filepathRoot = "."
 	const port = "8080"
 	myApiConfig := apiConfig{
@@ -127,6 +160,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", myApiConfig.returnHits)
 	mux.HandleFunc("POST /admin/reset", myApiConfig.reset)
 	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
+	mux.HandleFunc("POST /api/users", createUser)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
