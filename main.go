@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -35,12 +37,49 @@ func (cfg *apiConfig) middlewareMetricsIncrease(next http.Handler) http.Handler 
 	})
 }
 
+func validate_chirp(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+
+	type errorReturn struct {
+		Error string `json:"error"`
+	}
+
+	type returnVals struct {
+		Valid bool `json:"valid"`
+	}
+
+
+	params := parameters{}
+	
+
+	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
+		respondJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		return
+	}
+
+	if len(params.Body) > 140 {
+		respondJSON(w, http.StatusBadRequest, errorReturn{Error: "Chrip is too long"})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, returnVals{Valid: true})
+}
+
+func respondJSON(w http.ResponseWriter, status int, body interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("Failed to write JSON response: %s", err)
+	}
+}
+
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
 	myApiConfig := apiConfig{
 		fileserverHits: atomic.Int32{},
-		
 	}
 
 	mux := http.NewServeMux()
@@ -52,6 +91,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /admin/metrics", myApiConfig.returnHits)
 	mux.HandleFunc("POST /admin/reset", myApiConfig.reset)
+	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
