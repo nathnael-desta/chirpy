@@ -134,6 +134,14 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if exists, err := cfg.dbQueries.EmailExists(r.Context() ,params.Email); err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to query %s", err))
+		return
+	} else if exists == 1 {
+		respondWithError(w, http.StatusBadRequest, fmt.Errorf("email already exists"))
+		return
+	}
+
 	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
 
 	if err != nil {

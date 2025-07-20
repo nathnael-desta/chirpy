@@ -10,3 +10,6 @@ RETURNING *;
 
 -- name: Reset :exec
 DELETE FROM users;
+
+-- name: EmailExists :one
+SELECT 1 FROM users WHERE email = $1 LIMIT 1;

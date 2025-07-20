@@ -32,6 +32,17 @@ func (q *Queries) CreateUser(ctx context.Context, email string) (User, error) {
 	return i, err
 }
 
+const emailExists = `-- name: EmailExists :one
+SELECT 1 FROM users WHERE email = $1 LIMIT 1
+`
+
+func (q *Queries) EmailExists(ctx context.Context, email string) (int32, error) {
+	row := q.db.QueryRowContext(ctx, emailExists, email)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const reset = `-- name: Reset :exec
 DELETE FROM users
 `
