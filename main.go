@@ -34,6 +34,14 @@ type errorReturn struct {
 	Error string `json:"error"`
 }
 
+type returnVals struct {
+	Id        uuid.UUID     `json:"id"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	Body      string        `json:"body"`
+	UserID    uuid.NullUUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
 	html := fmt.Sprintf(`
 	 <html>
@@ -58,6 +66,7 @@ func (cfg *apiConfig) middlewareMetricsIncrease(next http.Handler) http.Handler 
 func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
+	log.Println(body)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Errorf("failed to write JSON response: %s", err))
 	}
@@ -117,16 +126,8 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body   string        `json:"body"`
+		Body   string `json:"body"`
 		UserID string `json:"user_id"`
-	}
-
-	type returnVals struct {
-		Id        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Body      string    `json:"body"`
-		UserID    uuid.NullUUID    `json:"user_id"`
 	}
 
 	params := parameters{}
@@ -152,10 +153,9 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chirpParams := database.CreateChirpParams{
-		Body: params.Body,
+		Body:   params.Body,
 		UserID: uuid.NullUUID{UUID: userUUID, Valid: true},
 	}
-
 
 	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), chirpParams)
 
@@ -169,7 +169,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: chirp.CreatedAt,
 		UpdatedAt: chirp.UpdatedAt,
 		Body:      chirp.Body,
-		UserID: chirp.UserID,
+		UserID:    chirp.UserID,
 	}
 	respondWithJSON(w, http.StatusCreated, returnChirp)
 }
@@ -189,6 +189,29 @@ func replaceProfane(s string) (string, bool) {
 	}
 	return strings.Join(split_sentence, " "), modified
 }
+
+func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "query faild"})
+	}
+
+	resp := make([]returnVals, 0, len(chirps))
+
+	for _, v := range(chirps) {
+		resp = append(resp, returnVals{
+			Id: v.ID,
+			CreatedAt: v.CreatedAt,
+			UpdatedAt: v.UpdatedAt,
+			Body: v.Body,
+			UserID: v.UserID,
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
+}
+
+
 
 func main() {
 	godotenv.Load()
@@ -218,6 +241,7 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", myApiConfig.reset)
 	mux.HandleFunc("POST /api/users", myApiConfig.createUser)
 	mux.HandleFunc("POST /api/chirps", myApiConfig.createChirp)
+	mux.HandleFunc("GET /api/chirps", myApiConfig.getAllChirps)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
