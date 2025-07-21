@@ -117,22 +117,22 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body   string `json:"body"`
-		UserId string `json:"user_id"`
+		Body   string        `json:"body"`
+		UserID string `json:"user_id"`
 	}
 
 	type returnVals struct {
-		Id        string `json:"id"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-		Body      string `json:"body"`
-		UserId    string `json:"user_id"`
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.NullUUID    `json:"user_id"`
 	}
 
 	params := parameters{}
 
-	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: fmt.Sprintf("Couldn't decode request body: %s", err)})
 		return
 	}
 
@@ -144,7 +144,34 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	replacedString, _ := replaceProfane(params.Body)
 	params.Body = replacedString
 
+	userUUID, err := uuid.Parse(params.UserID)
 
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "invalid uuid"})
+		return
+	}
+
+	chirpParams := database.CreateChirpParams{
+		Body: params.Body,
+		UserID: uuid.NullUUID{UUID: userUUID, Valid: true},
+	}
+
+
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), chirpParams)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("couldn't create chirp: %s", err))
+		return
+	}
+
+	returnChirp := returnVals{
+		Id:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID: chirp.UserID,
+	}
+	respondWithJSON(w, http.StatusCreated, returnChirp)
 }
 
 func replaceProfane(s string) (string, bool) {
