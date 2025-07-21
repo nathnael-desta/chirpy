@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/nathnael-desta/chirpy/internal/auth"
 	"github.com/nathnael-desta/chirpy/internal/database"
 )
 
@@ -40,6 +41,23 @@ type returnVals struct {
 	updatedAt time.Time     `json:"updated_at"`
 	body      string        `json:"body"`
 	userID    uuid.NullUUID `json:"user_id"`
+}
+
+type userReturn struct {
+	Id        uuid.UUID `json:id""`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
+}
+
+type userParams struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type CreateChirpParams struct {
+	Body   string `json:"body"`
+	UserID string `json:"user_id"`
 }
 
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
@@ -79,33 +97,46 @@ func respondWithError(w http.ResponseWriter, status int, err error) {
 }
 
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Email string `json:"email"`
-	}
 
-	params := parameters{}
+	params := userParams{}
 
 	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: fmt.Sprintf("Couldn't decode request body %s", OK)})
 		return
 	}
 
-	if exists, err := cfg.dbQueries.EmailExists(r.Context(), params.Email); err != nil {
-		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to query %s", err))
-		return
-	} else if exists == 1 {
-		respondWithError(w, http.StatusBadRequest, fmt.Errorf("email already exists"))
-		return
+	if _, err := cfg.dbQueries.EmailExists(r.Context(), params.Email); err != sql.ErrNoRows {
+		if err == nil {
+			respondWithError(w, http.StatusBadRequest, fmt.Errorf("email already exists"))
+			return
+		} else {
+			respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to query for email %s", err))
+			return
+		}
 	}
 
-	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	hashedPassword, err := auth.HashPassword(params.Password)
 
 	if err != nil {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "faild to query"})
+		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "password hashing failed"})
 		return
 	}
 
-	respondWithJSON(w, http.StatusCreated, user)
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{Email: params.Email, HashedPassword: hashedPassword})
+
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "faild to query for create user"})
+		return
+	}
+
+	returnVals := userReturn{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	respondWithJSON(w, http.StatusCreated, returnVals)
 }
 
 func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
@@ -125,12 +156,7 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body   string `json:"body"`
-		UserID string `json:"user_id"`
-	}
-
-	params := parameters{}
+	params := CreateChirpParams{}
 
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: fmt.Sprintf("Couldn't decode request body: %s", err)})
@@ -235,6 +261,37 @@ func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
+	params := userParams{}
+
+	if OK := json.NewDecoder(r.Body).Decode(&params); OK != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "Couldn't decode request body"})
+		return
+	}
+
+	user, err := cfg.dbQueries.GetUserByEmail(r.Context(), params.Email)
+
+	if err != nil {
+		respondWithJSON(w, http.StatusNotFound, errorReturn{Error: "Incorrect email or password"})
+		return
+	}
+
+	if err := auth.CheckPasswordHash(params.Password, user.HashedPassword); err != nil {
+		respondWithJSON(w, http.StatusUnauthorized, errorReturn{Error: "Incorrect email or password"})
+		return
+	}
+
+	returnVals := userReturn{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+
+	respondWithJSON(w, http.StatusOK, returnVals)
+
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -265,6 +322,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", myApiConfig.createChirp)
 	mux.HandleFunc("GET /api/chirps", myApiConfig.getAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpid}", myApiConfig.getChirp)
+	mux.HandleFunc("POST /api/login", myApiConfig.logIn)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
