@@ -92,7 +92,7 @@ func (cfg *apiConfig) middlewareMetricsIncrease(next http.Handler) http.Handler 
 func respondWithJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	log.Println(body)
+	// log.Println(body)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		respondWithError(w, http.StatusBadRequest, fmt.Errorf("failed to write JSON response: %s", err))
 	}
@@ -376,17 +376,22 @@ func getToken(userID uuid.UUID, tokenSecret string) (string, error) {
 	return token, nil
 }
 
-func checkRefreshToken(cfg *apiConfig,ctx context.Context, token string) (database.RefreshToken, error) {
+func checkRefreshToken(cfg *apiConfig, ctx context.Context, token string) (database.RefreshToken, error) {
 	refreshToken, err := cfg.dbQueries.GetRefreshToken(ctx, token)
 	if err != nil {
 		return database.RefreshToken{}, err
 	}
+	log.Println(refreshToken.ExpiresAt, "\n", time.Now(), "\n", refreshToken.ExpiresAt.Before(time.Now()), "////////////////////////////////")
 
 	if refreshToken.ExpiresAt.Before(time.Now()) {
 		// handle expired token, e.g., return an error
 		return database.RefreshToken{}, fmt.Errorf("refresh token has expired")
 	}
-	return refreshToken,  nil
+	if refreshToken.RevokedAt.Valid {
+		// handle expired token, e.g., return an error
+		return database.RefreshToken{}, fmt.Errorf("refresh token has been revoked")
+	}
+	return refreshToken, nil
 }
 
 func (cfg *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
@@ -398,18 +403,37 @@ func (cfg *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 	refreshToken, err := checkRefreshToken(cfg, r.Context(), token)
 
-	if  err != nil {
+	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, fmt.Errorf("refresh token failed: %v", err))
 		return
 	}
 
-	newToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.tokenSecret, time.Duration(60*60) * time.Second)
+	newToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.tokenSecret, time.Duration(60*60)*time.Second)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, RefreshTokenReturn{Token:newToken})
+	respondWithJSON(w, http.StatusOK, RefreshTokenReturn{Token: newToken})
+}
+
+func (cfg *apiConfig) revokeRefresh(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := cfg.dbQueries.RevokeRefreshToken(r.Context(), token); err != nil {
+		respondWithError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var emptyReturn interface{}
+
+	respondWithJSON(w, http.StatusNoContent, emptyReturn)
+
 }
 
 func main() {
@@ -445,6 +469,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpid}", myApiConfig.getChirp)
 	mux.HandleFunc("POST /api/login", myApiConfig.logIn)
 	mux.HandleFunc("POST /api/refresh", myApiConfig.refreshToken)
+	mux.HandleFunc("POST /api/revoke", myApiConfig.revokeRefresh)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
