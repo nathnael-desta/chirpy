@@ -55,7 +55,7 @@ type userReturn struct {
 type userParams struct {
 	Email            string `json:"email"`
 	Password         string `json:"password"`
-	ExpiresInSeconds *int   `json:"expires_in_seconds"`
+	ExpiresInSeconds  *int  `json:"expires_in_seconds"`
 }
 
 type CreateChirpParams struct {
@@ -344,7 +344,7 @@ func getToken(params *userParams, userID uuid.UUID, tokenSecret string) (string,
 		params.ExpiresInSeconds = &hour
 	}
 
-	token, err := auth.MakeJWT(userID, tokenSecret, time.Duration(*params.ExpiresInSeconds))
+	token, err := auth.MakeJWT(userID, tokenSecret, time.Duration(*params.ExpiresInSeconds) * time.Second)
 
 	if err != nil {
 		// respondWithError(w, http.StatusInternalServerError, err)

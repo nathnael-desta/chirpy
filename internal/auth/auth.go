@@ -25,6 +25,7 @@ func CheckPasswordHash(password, hash string) error {
 }
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+	log.Printf("expiresIn: %v. expiresAt: %v. Issues at %v:", expiresIn,jwt.NewNumericDate(time.Now().Add(expiresIn)), jwt.NewNumericDate(time.Now()))
 	claims := jwt.RegisteredClaims{
 		Subject:   userID.String(),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
