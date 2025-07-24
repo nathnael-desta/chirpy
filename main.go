@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -45,22 +46,26 @@ type returnVals struct {
 }
 
 type userReturn struct {
-	Id        uuid.UUID `json:id""`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	Id           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 type userParams struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	ExpiresInSeconds  *int  `json:"expires_in_seconds"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type CreateChirpParams struct {
 	Body   string `json:"body"`
 	UserID string `json:"user_id"`
+}
+
+type RefreshTokenReturn struct {
+	Token string `json:"token"`
 }
 
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
@@ -132,18 +137,14 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// hour := 1 * 60 * 60
+	token, err := getToken(user.ID, cfg.tokenSecret)
 
-	// if params.ExpiresInSeconds == nil {
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
 
-	// 	params.ExpiresInSeconds = &hour
-	// }
-
-	// if *params.ExpiresInSeconds > hour {
-	// 	params.ExpiresInSeconds = &hour
-	// }
-
-	token, err := getToken(&params, user.ID, cfg.tokenSecret)
+	refreshToken, err := getRefreshToken(r.Context(), cfg, user.ID)
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err)
@@ -151,11 +152,12 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnVals := userReturn{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-		Token:     token,
+		Id:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        token,
+		RefreshToken: refreshToken.Token,
 	}
 
 	respondWithJSON(w, http.StatusCreated, returnVals)
@@ -266,7 +268,7 @@ func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 			UserID:    v.UserID,
 		})
 	}
-	
+
 	respondWithJSON(w, http.StatusOK, resp)
 }
 func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +316,14 @@ func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := getToken(&params, user.ID, cfg.tokenSecret)
+	token, err := getToken(user.ID, cfg.tokenSecret)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	refreshToken, err := getRefreshToken(r.Context(), cfg, user.ID)
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err)
@@ -322,36 +331,85 @@ func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnVals := userReturn{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-		Token:     token,
+		Id:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        token,
+		RefreshToken: refreshToken.Token,
 	}
 
 	respondWithJSON(w, http.StatusOK, returnVals)
 
 }
 
-func getToken(params *userParams, userID uuid.UUID, tokenSecret string) (string, error) {
-	hour := 1 * 60 * 60
-
-	if params.ExpiresInSeconds == nil {
-
-		params.ExpiresInSeconds = &hour
-	}
-
-	if *params.ExpiresInSeconds > hour {
-		params.ExpiresInSeconds = &hour
-	}
-
-	token, err := auth.MakeJWT(userID, tokenSecret, time.Duration(*params.ExpiresInSeconds) * time.Second)
+func getRefreshToken(context context.Context, cfg *apiConfig, userID uuid.UUID) (database.RefreshToken, error) {
+	refreshTokenCode, err := auth.MakeRefreshToken()
 
 	if err != nil {
-		// respondWithError(w, http.StatusInternalServerError, err)
+		return database.RefreshToken{}, err
+	}
+
+	refreshTokenParams := database.CreateRefreshTokenParams{
+		Token: refreshTokenCode,
+		UserID: uuid.NullUUID{
+			UUID:  userID,
+			Valid: true,
+		},
+		ExpiresAt: time.Now().Add(time.Duration(60*60*24*60) * time.Second),
+	}
+
+	refreshToken, err := cfg.dbQueries.CreateRefreshToken(context, refreshTokenParams)
+
+	if err != nil {
+		return database.RefreshToken{}, err
+	}
+	return refreshToken, nil
+}
+
+func getToken(userID uuid.UUID, tokenSecret string) (string, error) {
+	token, err := auth.MakeJWT(userID, tokenSecret, time.Duration(3600)*time.Second)
+
+	if err != nil {
 		return "", err
 	}
 	return token, nil
+}
+
+func checkRefreshToken(cfg *apiConfig,ctx context.Context, token string) (database.RefreshToken, error) {
+	refreshToken, err := cfg.dbQueries.GetRefreshToken(ctx, token)
+	if err != nil {
+		return database.RefreshToken{}, err
+	}
+
+	if refreshToken.ExpiresAt.Before(time.Now()) {
+		// handle expired token, e.g., return an error
+		return database.RefreshToken{}, fmt.Errorf("refresh token has expired")
+	}
+	return refreshToken,  nil
+}
+
+func (cfg *apiConfig) refreshToken(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err)
+		return
+	}
+	refreshToken, err := checkRefreshToken(cfg, r.Context(), token)
+
+	if  err != nil {
+		respondWithError(w, http.StatusUnauthorized, fmt.Errorf("refresh token failed: %v", err))
+		return
+	}
+
+	newToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.tokenSecret, time.Duration(60*60) * time.Second)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, RefreshTokenReturn{Token:newToken})
 }
 
 func main() {
@@ -386,6 +444,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", myApiConfig.getAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpid}", myApiConfig.getChirp)
 	mux.HandleFunc("POST /api/login", myApiConfig.logIn)
+	mux.HandleFunc("POST /api/refresh", myApiConfig.refreshToken)
 
 	myServer := http.Server{
 		Addr:    ":" + port,

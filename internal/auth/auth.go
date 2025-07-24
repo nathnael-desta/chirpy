@@ -1,12 +1,12 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
-
 	"net/http"
 	"strings"
 	"time"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -64,4 +64,14 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", errors.New("incorrect autorization string format")
 	}
 	return parts[1], nil
+}
+
+func MakeRefreshToken() (string, error) {
+	bytes := make([]byte, 32)
+
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(bytes), nil
 }
