@@ -2,7 +2,7 @@ package auth
 
 import (
 	"errors"
-	"log"
+
 	"net/http"
 	"strings"
 	"time"
@@ -25,7 +25,6 @@ func CheckPasswordHash(password, hash string) error {
 }
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
-	log.Printf("expiresIn: %v. expiresAt: %v. Issues at %v:", expiresIn,jwt.NewNumericDate(time.Now().Add(expiresIn)), jwt.NewNumericDate(time.Now()))
 	claims := jwt.RegisteredClaims{
 		Subject:   userID.String(),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
@@ -52,11 +51,10 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, err
 	}
-	log.Println(userID, err, "..................................")
 	return userID, nil
 }
 
-func  GetBearerToken(headers http.Header) (string, error) {
+func GetBearerToken(headers http.Header) (string, error) {
 	auth := headers.Get("Authorization")
 	if auth == "" {
 		return "", errors.New("failed to get autorization")

@@ -37,11 +37,11 @@ type errorReturn struct {
 }
 
 type returnVals struct {
-	id        uuid.UUID     `json:"id"`
-	createdAt time.Time     `json:"created_at"`
-	updatedAt time.Time     `json:"updated_at"`
-	body      string        `json:"body"`
-	userID    uuid.NullUUID `json:"user_id"`
+	Id        uuid.UUID     `json:"id"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	Body      string        `json:"body"`
+	UserID    uuid.NullUUID `json:"user_id"`
 }
 
 type userReturn struct {
@@ -186,6 +186,7 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := auth.ValidateJWT(token, cfg.tokenSecret); err != nil {
 		respondWithError(w, http.StatusUnauthorized, err)
+		return
 	}
 
 	params := CreateChirpParams{}
@@ -223,11 +224,11 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnChirp := returnVals{
-		id:        chirp.ID,
-		createdAt: chirp.CreatedAt,
-		updatedAt: chirp.UpdatedAt,
-		body:      chirp.Body,
-		userID:    chirp.UserID,
+		Id:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	}
 	respondWithJSON(w, http.StatusCreated, returnChirp)
 }
@@ -258,18 +259,18 @@ func (cfg *apiConfig) getAllChirps(w http.ResponseWriter, r *http.Request) {
 
 	for _, v := range chirps {
 		resp = append(resp, returnVals{
-			id:        v.ID,
-			createdAt: v.CreatedAt,
-			updatedAt: v.UpdatedAt,
-			body:      v.Body,
-			userID:    v.UserID,
+			Id:        v.ID,
+			CreatedAt: v.CreatedAt,
+			UpdatedAt: v.UpdatedAt,
+			Body:      v.Body,
+			UserID:    v.UserID,
 		})
 	}
-
+	
 	respondWithJSON(w, http.StatusOK, resp)
 }
-
 func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
+
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 4 {
 		respondWithError(w, http.StatusBadRequest, fmt.Errorf("id not given"))
