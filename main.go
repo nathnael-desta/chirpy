@@ -22,6 +22,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	tokenSecret    string
 }
 
 type User struct {
@@ -48,11 +49,13 @@ type userReturn struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token"`
 }
 
 type userParams struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	ExpiresInSeconds *int   `json:"expires_in_seconds"`
 }
 
 type CreateChirpParams struct {
@@ -129,11 +132,30 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// hour := 1 * 60 * 60
+
+	// if params.ExpiresInSeconds == nil {
+
+	// 	params.ExpiresInSeconds = &hour
+	// }
+
+	// if *params.ExpiresInSeconds > hour {
+	// 	params.ExpiresInSeconds = &hour
+	// }
+
+	token, err := getToken(&params, user.ID, cfg.tokenSecret)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	returnVals := userReturn{
 		Id:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     token,
 	}
 
 	respondWithJSON(w, http.StatusCreated, returnVals)
@@ -156,6 +178,16 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	if _, err := auth.ValidateJWT(token, cfg.tokenSecret); err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+	}
+
 	params := CreateChirpParams{}
 
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
@@ -281,15 +313,44 @@ func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := getToken(&params, user.ID, cfg.tokenSecret)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	returnVals := userReturn{
 		Id:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		Token:     token,
 	}
 
 	respondWithJSON(w, http.StatusOK, returnVals)
 
+}
+
+func getToken(params *userParams, userID uuid.UUID, tokenSecret string) (string, error) {
+	hour := 1 * 60 * 60
+
+	if params.ExpiresInSeconds == nil {
+
+		params.ExpiresInSeconds = &hour
+	}
+
+	if *params.ExpiresInSeconds > hour {
+		params.ExpiresInSeconds = &hour
+	}
+
+	token, err := auth.MakeJWT(userID, tokenSecret, time.Duration(*params.ExpiresInSeconds))
+
+	if err != nil {
+		// respondWithError(w, http.StatusInternalServerError, err)
+		return "", err
+	}
+	return token, nil
 }
 
 func main() {
@@ -307,6 +368,7 @@ func main() {
 		fileserverHits: atomic.Int32{},
 		dbQueries:      dbQueries,
 		platform:       os.Getenv("PLATFORM"),
+		tokenSecret:    os.Getenv("JWT_SECRET"),
 	}
 
 	mux := http.NewServeMux()
