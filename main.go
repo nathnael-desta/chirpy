@@ -436,6 +436,90 @@ func (cfg *apiConfig) revokeRefresh(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	params := userParams{}
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: fmt.Sprintf("Couldn't decode request body: %s", err)})
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	user, err := cfg.dbQueries.GetUserByID(r.Context(), userID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, fmt.Errorf("user not found: %s", err))
+		return
+	}
+
+	if params.Email == "" || params.Password == "" {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "email and password are required"})
+		return
+
+	}
+
+	if params.Email != user.Email {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "you can only update your own email"})
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "password hashing failed"})
+		return
+	}
+	// Update user in the database
+	updateParams := database.UpdateUserParams{
+		ID:             userID,
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	}
+	if _, err := cfg.dbQueries.UpdateUser(r.Context(), updateParams); err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to update user: %s", err))
+		return
+	}
+
+	newUser, err := cfg.dbQueries.GetUserByID(r.Context(), userID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, fmt.Errorf("failed to retrieve updated user: %s", err))
+		return
+	}
+
+	newToken, err := getToken(user.ID, cfg.tokenSecret)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	refreshToken, err := getRefreshToken(r.Context(), cfg, user.ID)
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	returnVals := userReturn{
+		Id:        newUser.ID,
+		CreatedAt: newUser.CreatedAt,
+		UpdatedAt: newUser.UpdatedAt,
+		Email:     newUser.Email,
+		Token:     newToken,
+		RefreshToken: refreshToken.Token,
+	}
+	respondWithJSON(w, http.StatusOK, returnVals)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -470,6 +554,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", myApiConfig.logIn)
 	mux.HandleFunc("POST /api/refresh", myApiConfig.refreshToken)
 	mux.HandleFunc("POST /api/revoke", myApiConfig.revokeRefresh)
+	mux.HandleFunc("PUT /api/users", myApiConfig.updateUser)
 
 	myServer := http.Server{
 		Addr:    ":" + port,
