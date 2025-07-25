@@ -468,11 +468,6 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 
 	}
 
-	if params.Email != user.Email {
-		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "you can only update your own email"})
-		return
-	}
-
 	hashedPassword, err := auth.HashPassword(params.Password)
 	if err != nil {
 		respondWithJSON(w, http.StatusInternalServerError, errorReturn{Error: "password hashing failed"})
