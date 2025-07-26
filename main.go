@@ -568,16 +568,15 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) upgradeToRed(w http.ResponseWriter, r *http.Request) {
-	token, err := auth.GetBearerToken(r.Header)
+	APIKey, err := auth.GetAPIKey(r.Header)
 
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err)
 		return
 	}
 
-	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
-	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, err)
+	if APIKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, fmt.Errorf("invalid API key"))
 		return
 	}
 
@@ -589,6 +588,12 @@ func (cfg *apiConfig) upgradeToRed(w http.ResponseWriter, r *http.Request) {
 
 	if params.Event != "user.upgraded" {
 		respondWithJSON(w, http.StatusNoContent, nil)
+		return
+	}
+
+	userID, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: "invalid user ID"})
 		return
 	}
 
