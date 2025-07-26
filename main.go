@@ -515,6 +515,46 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, returnVals)
 }
 
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
+	if err != nil {	
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 4 {
+		respondWithError(w, http.StatusBadRequest, fmt.Errorf("id not given"))
+		return
+	}
+	chirpId, err := uuid.Parse(parts[len(parts)-1])
+
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, fmt.Errorf("incorrect id format"))
+		return
+	}
+
+	if chirp, err := cfg.dbQueries.GetChirp(r.Context(), chirpId); err != nil {
+		respondWithJSON(w, http.StatusNotFound, errorReturn{Error: "query failed"})
+		return
+	} else if chirp.UserID.UUID != userID {
+		respondWithError(w, http.StatusForbidden, fmt.Errorf("you are not allowed to delete this chirp"))
+		return
+	}
+
+	if err := cfg.dbQueries.DeleteChirp(r.Context(), chirpId); err != nil {
+		respondWithJSON(w, http.StatusNotFound, errorReturn{Error: "query faild"})
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -546,6 +586,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", myApiConfig.createChirp)
 	mux.HandleFunc("GET /api/chirps", myApiConfig.getAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpid}", myApiConfig.getChirp)
+	mux.HandleFunc("DELETE /api/chirps/{chirpid}", myApiConfig.deleteChirp)
 	mux.HandleFunc("POST /api/login", myApiConfig.logIn)
 	mux.HandleFunc("POST /api/refresh", myApiConfig.refreshToken)
 	mux.HandleFunc("POST /api/revoke", myApiConfig.revokeRefresh)
