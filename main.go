@@ -24,6 +24,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	tokenSecret    string
+	polkaKey       string
 }
 
 type User struct {
@@ -52,7 +53,7 @@ type userReturn struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
-	IsChirpyRed bool      `json:"is_chirpy_red"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 type userParams struct {
@@ -166,7 +167,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken.Token,
-		IsChirpyRed: user.IsChirpyRed,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, http.StatusCreated, returnVals)
@@ -346,7 +347,7 @@ func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken.Token,
-		IsChirpyRed: user.IsChirpyRed,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, http.StatusOK, returnVals)
@@ -515,13 +516,13 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnVals := userReturn{
-		Id:        newUser.ID,
-		CreatedAt: newUser.CreatedAt,
-		UpdatedAt: newUser.UpdatedAt,
-		Email:     newUser.Email,
-		Token:     newToken,
+		Id:           newUser.ID,
+		CreatedAt:    newUser.CreatedAt,
+		UpdatedAt:    newUser.UpdatedAt,
+		Email:        newUser.Email,
+		Token:        newToken,
 		RefreshToken: refreshToken.Token,
-		IsChirpyRed: newUser.IsChirpyRed,
+		IsChirpyRed:  newUser.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusOK, returnVals)
 }
@@ -534,7 +535,7 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
-	if err != nil {	
+	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err)
 		return
 	}
@@ -593,16 +594,16 @@ func (cfg *apiConfig) upgradeToRed(w http.ResponseWriter, r *http.Request) {
 
 	user, err := cfg.dbQueries.UpgradeToChirpyRed(r.Context(), userID)
 
-	if  err != nil {
+	if err != nil {
 		respondWithError(w, http.StatusNotFound, fmt.Errorf("couldn't find user: %s", err))
 		return
 	}
 
 	returnVals := userReturn{
-		Id:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		Id:          user.ID,
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
 		IsChirpyRed: user.IsChirpyRed,
 	}
 
@@ -625,6 +626,7 @@ func main() {
 		dbQueries:      dbQueries,
 		platform:       os.Getenv("PLATFORM"),
 		tokenSecret:    os.Getenv("JWT_SECRET"),
+		polkaKey:       os.Getenv("POLKA_KEY"),
 	}
 
 	mux := http.NewServeMux()

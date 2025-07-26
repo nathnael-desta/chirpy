@@ -4,12 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"net/http"
-	"strings"
-	"time"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
+	"net/http"
+	"strings"
+	"time"
 )
 
 func HashPassword(password string) (string, error) {
@@ -58,7 +58,7 @@ func GetBearerToken(headers http.Header) (string, error) {
 	auth := headers.Get("Authorization")
 	if auth == "" {
 		return "", errors.New("failed to get autorization")
-	} 
+	}
 	parts := strings.Split(auth, " ")
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return "", errors.New("incorrect autorization string format")
@@ -74,4 +74,16 @@ func MakeRefreshToken() (string, error) {
 	}
 
 	return hex.EncodeToString(bytes), nil
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if auth == "" {
+		return "", errors.New("failed to get autorization")
+	}
+	parts := strings.Split(auth, " ")
+	if len(parts) != 2 || parts[0] != "ApiKey" {
+		return "", errors.New("incorrect autorization string format")
+	}
+	return parts[1], nil
 }
