@@ -50,8 +50,9 @@ type userReturn struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Email        string    `json:"email"`
-	Token        string    `json:"token"`
-	RefreshToken string    `json:"refresh_token"`
+	Token        string    `json:"token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
 }
 
 type userParams struct {
@@ -66,6 +67,13 @@ type CreateChirpParams struct {
 
 type RefreshTokenReturn struct {
 	Token string `json:"token"`
+}
+
+type UpgradeToRedParams struct {
+	Event string `json:"event"`
+	Data  struct {
+		UserID string `json:"user_id"`
+	} `json:"data"`
 }
 
 func (cfg *apiConfig) returnHits(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +166,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken.Token,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, http.StatusCreated, returnVals)
@@ -337,6 +346,7 @@ func (cfg *apiConfig) logIn(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken.Token,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	respondWithJSON(w, http.StatusOK, returnVals)
@@ -511,6 +521,7 @@ func (cfg *apiConfig) updateUser(w http.ResponseWriter, r *http.Request) {
 		Email:     newUser.Email,
 		Token:     newToken,
 		RefreshToken: refreshToken.Token,
+		IsChirpyRed: newUser.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusOK, returnVals)
 }
@@ -555,6 +566,49 @@ func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (cfg *apiConfig) upgradeToRed(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.tokenSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err)
+		return
+	}
+
+	params := UpgradeToRedParams{}
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithJSON(w, http.StatusBadRequest, errorReturn{Error: fmt.Sprintf("Couldn't decode request body: %s", err)})
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		respondWithJSON(w, http.StatusNoContent, nil)
+		return
+	}
+
+	user, err := cfg.dbQueries.UpgradeToChirpyRed(r.Context(), userID)
+
+	if  err != nil {
+		respondWithError(w, http.StatusNotFound, fmt.Errorf("couldn't find user: %s", err))
+		return
+	}
+
+	returnVals := userReturn{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+		IsChirpyRed: user.IsChirpyRed,
+	}
+
+	respondWithJSON(w, http.StatusNoContent, returnVals)
+}
+
 func main() {
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
@@ -591,6 +645,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", myApiConfig.refreshToken)
 	mux.HandleFunc("POST /api/revoke", myApiConfig.revokeRefresh)
 	mux.HandleFunc("PUT /api/users", myApiConfig.updateUser)
+	mux.HandleFunc("PUT /api/polka/webhooks", myApiConfig.upgradeToRed)
 
 	myServer := http.Server{
 		Addr:    ":" + port,

@@ -80,7 +80,7 @@ RETURNING *;
 -- name: DeleteChirp :exec
 DELETE FROM chirps
 WHERE id = $1;
--- name: UpgradeToChirpyRed :exec
+-- name: UpgradeToChirpyRed :one
 UPDATE users
 SET
     is_chirpy_red = true,
